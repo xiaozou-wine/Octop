@@ -26,6 +26,7 @@
 ### 修复
 - 模型调用重试耗尽后不再抛出笼统的「多次调用失败」：把具体原因写成给模型的恢复提示（上下文超限、限流、流式中断等），聊天页展示对应说明；后台委派仍标记 failed，并把该原因交给源专家（委派失败标记仍依赖 harness 正确上报）。
 - Windows 残留盘符路径（如 ``D:\\octop-data\\data\\文章存稿\\…``）读写文件时不再把 jail 拒绝渲染成「多次调用模型失败」：能对上当前存储根的改写成虚拟路径继续读；对不上的把原因交给模型，页面显示存储根说明。
+- `GET /api/agents/{agent_id}/threads` 的 `limit` 参数补上边界校验（`ge=1, le=HISTORY_MAX_LIMIT`）：此前它被原样交给 SQL `LIMIT`，`limit=-1` 因 SQLite 把负 LIMIT 解释为「不限制」而返回该用户的全部 thread，`limit>200` 也不被拒绝（PostgreSQL 上同一条语句直接报 `LIMIT must not be negative`）。采用与 `admin.py` 的 audit-log 相同的 `Query(ge=1, le=...)` 显式拒绝（422），而不是本模块 message 分页端点的 `_clamp_history_limit` 静默夹取：`limit=-1` 在两个后端行为不一致（SQLite 返回全部、PostgreSQL 报错），夹取会把这个差异藏起来（Fixes #1426）。配套修正 dashboard 侧：会话列表用 `limit + 1` 探测下一页，翻到上限后会请求 `?limit=201` 而收到 422，`loadMoreSessions` 静默吞掉该错误、`hasMore` 仍为 true，按钮继续显示却再也点不动。现在请求值在客户端夹取到同一上限，到顶后不再显示「加载更多」。
 - 邮箱连接器读取含裸非 ASCII 字节邮件头（如未 MIME 编码的中文发件人/主题）时崩溃 `Object of type Header is not JSON serializable`：`search_emails`/`read_email` 改用 `email.policy.default` 解析并统一 `str()` 转换，同时自动解码 MIME 编码头为可读文本；正文中声明未知字符集（如 `unknown-8bit`）时回退 UTF-8 而非抛 `LookupError`。影响所有基于该通用 IMAP/SMTP 适配器的邮箱（QQ/网易/Gmail 等）。
 - httpx 0.28 将 ``NO_PROXY`` 中的 CIDR（如 ``192.168.0.0/16``）当成精确 IP，内网地址误走代理；同时兼容 Windows 分号分隔、IPv6 CIDR，以及 macOS/Windows 系统代理下的 loopback 直连（Fixes #1347）。
 - Windows 上「存储根目录」选择器不再被限制在 home 所在盘：浏览树改为枚举全部就绪盘符（新增 `GET /api/filesystem/roots`，`/api/filesystem/defaults` 下发 `browse_roots`）
