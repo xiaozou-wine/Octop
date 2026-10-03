@@ -26,6 +26,7 @@
 ### 修复
 - 模型调用重试耗尽后不再抛出笼统的「多次调用失败」：把具体原因写成给模型的恢复提示（上下文超限、限流、流式中断等），聊天页展示对应说明；后台委派仍标记 failed，并把该原因交给源专家（委派失败标记仍依赖 harness 正确上报）。
 - Windows 残留盘符路径（如 ``D:\\octop-data\\data\\文章存稿\\…``）读写文件时不再把 jail 拒绝渲染成「多次调用模型失败」：能对上当前存储根的改写成虚拟路径继续读；对不上的把原因交给模型，页面显示存储根说明。
+- 工作区 `_builtin_skills` 写保护可被 `file://` / 宿主绝对路径绕过：守卫固定按 workspace 相对解析路径、只匹配前缀，而 `_workspace_io_path` 对 `file://` 与宿主绝对路径先返回宿主路径，两者解析结果不一致。`PUT /workspace/file`、`POST /workspace/upload` 此前完全没调用守卫，mkdir / delete / move / PUT /doc 虽调用但同样被绕过，六个写接口都能写进 Octop 自有的内置技能根（实测可创建目录、删除真实内置的 `skill-manager/SKILL.md`）。写进去的内容会被 `_resolve_skill` 当作内置技能列出，而 delete / move 与技能删除接口对 builtin 一律拒绝、重启同步也只清 `RETIRED_BUILTIN_SKILLS` 白名单，因此删不掉。现守卫接收调用方的 `from_workspace`、先折叠 `..` 再校验实际落盘路径、按路径段匹配，六个接口均返回 403。折叠让判定跟随路径落点而非字面写法：`/sub/../_builtin_skills/x` 不再折回受保护根，`/keep/..` 这类折叠到工作区根的写法不再能绕过「不可修改根目录」，而 `a/_builtin_skills/../../b.md` 这类落在根目录的普通写入也不再被误拒（Fixes #1100、#1126）。
 - 邮箱连接器读取含裸非 ASCII 字节邮件头（如未 MIME 编码的中文发件人/主题）时崩溃 `Object of type Header is not JSON serializable`：`search_emails`/`read_email` 改用 `email.policy.default` 解析并统一 `str()` 转换，同时自动解码 MIME 编码头为可读文本；正文中声明未知字符集（如 `unknown-8bit`）时回退 UTF-8 而非抛 `LookupError`。影响所有基于该通用 IMAP/SMTP 适配器的邮箱（QQ/网易/Gmail 等）。
 - httpx 0.28 将 ``NO_PROXY`` 中的 CIDR（如 ``192.168.0.0/16``）当成精确 IP，内网地址误走代理；同时兼容 Windows 分号分隔、IPv6 CIDR，以及 macOS/Windows 系统代理下的 loopback 直连（Fixes #1347）。
 - Windows 上「存储根目录」选择器不再被限制在 home 所在盘：浏览树改为枚举全部就绪盘符（新增 `GET /api/filesystem/roots`，`/api/filesystem/defaults` 下发 `browse_roots`）
